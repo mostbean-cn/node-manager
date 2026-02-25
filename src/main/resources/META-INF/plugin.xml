@@ -1,0 +1,79 @@
+<!-- Plugin Configuration File -->
+<idea-plugin>
+        <id>com.github.nicestudent.nodemanager</id>
+        <name>Node Manager</name>
+        <vendor>nicestudent</vendor>
+
+        <description><![CDATA[
+    <h2>Node Manager</h2>
+    <p>Manage Node.js versions directly within IntelliJ IDEA.</p>
+
+    <h3>Features</h3>
+    <ul>
+        <li>View, install, switch, and uninstall Node.js versions</li>
+        <li>Support for <b>nvm</b> and <b>fnm</b> (auto-detection)</li>
+        <li>Manager dashboard with status monitoring and conflict detection</li>
+        <li>Status bar widget showing the active Node.js version</li>
+        <li>Searchable version list from the official Node.js registry</li>
+        <li>Configurable mirror sources for faster downloads</li>
+    </ul>
+
+    <h3>Requirements</h3>
+    <p>At least one version manager must be installed on your system:</p>
+    <ul>
+        <li><a href="https://github.com/nvm-sh/nvm">nvm</a> (MIT License) — Mac / Linux</li>
+        <li><a href="https://github.com/coreybutler/nvm-windows">nvm-windows</a> (MIT License) — Windows</li>
+        <li><a href="https://github.com/Schniz/fnm">fnm</a> (GPL-3.0 License) — Cross-platform</li>
+    </ul>
+
+    <h3>Disclaimer</h3>
+    <p>This plugin does not bundle, include, or redistribute any third-party software.
+       It integrates with version managers already installed on the user's system.
+       "Node.js" is a trademark of the OpenJS Foundation.
+       All other trademarks are the property of their respective owners.</p>
+
+    <h3>Privacy</h3>
+    <p>This plugin does not collect any user data or telemetry.
+       The only network request is fetching the public Node.js version list
+       from <code>nodejs.org</code> or the configured mirror.</p>
+    ]]>        </description>
+
+        <depends>com.intellij.modules.platform</depends>
+
+        <extensions defaultExtensionNs="com.intellij">
+                <!-- Tool Window -->
+                <toolWindow id="Node Manager" anchor="right" icon="/icons/nodeManager.svg" factoryClass="com.github.nicestudent.nodemanager.ui.toolwindow.NodeManagerToolWindowFactory"/>
+
+                <!-- Status Bar Widget -->
+                <statusBarWidgetFactory id="NodeVersionStatusBar" implementation="com.github.nicestudent.nodemanager.ui.statusbar.NodeVersionStatusBarWidgetFactory" order="after Position"/>
+
+                <!-- Settings Panel -->
+                <projectConfigurable parentId="tools" instance="com.github.nicestudent.nodemanager.ui.settings.NodeManagerSettingsConfigurable" id="com.github.nicestudent.nodemanager.settings" displayName="Node Manager"/>
+
+                <!-- Application-level Services -->
+                <applicationService serviceImplementation="com.github.nicestudent.nodemanager.services.NodeVersionService"/>
+                <applicationService serviceImplementation="com.github.nicestudent.nodemanager.ui.settings.NodeManagerSettings"/>
+                <applicationService serviceImplementation="com.github.nicestudent.nodemanager.manager.VersionManagerRegistry"/>
+
+                <!-- Project-level Services -->
+                <projectService serviceImplementation="com.github.nicestudent.nodemanager.services.ProjectConfigService"/>
+
+                <!-- Notification Group -->
+                <notificationGroup id="Node Manager" displayType="BALLOON" toolWindowId="Node Manager"/>
+
+                <!-- Startup Activity -->
+                <backgroundPostStartupActivity implementation="com.github.nicestudent.nodemanager.NodeManagerStartupActivity"/>
+        </extensions>
+
+        <actions>
+                <group id="NodeManager.ActionGroup" text="Node Manager" description="Node Manager actions" popup="true">
+                        <add-to-group group-id="ToolsMenu" anchor="last"/>
+
+                        <action id="NodeManager.InstallNode" class="com.github.nicestudent.nodemanager.actions.InstallNodeAction" text="Install Node.js Version..." description="Install a new Node.js version"/>
+
+                        <action id="NodeManager.SwitchNode" class="com.github.nicestudent.nodemanager.actions.SwitchNodeAction" text="Switch Node.js Version..." description="Switch to a different Node.js version"/>
+
+                        <action id="NodeManager.UninstallNode" class="com.github.nicestudent.nodemanager.actions.UninstallNodeAction" text="Uninstall Node.js Version..." description="Uninstall a Node.js version"/>
+                </group>
+        </actions>
+</idea-plugin>
