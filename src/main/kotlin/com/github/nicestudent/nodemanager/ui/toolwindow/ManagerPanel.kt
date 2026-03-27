@@ -34,6 +34,25 @@ import javax.swing.*
  */
 class ManagerPanel(private val project: Project) {
 
+    private val cardsPanel = JPanel().apply {
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        border = BorderFactory.createEmptyBorder(0, 8, 8, 8)
+    }
+
+    private data class ManagerCardState(
+        val name: String,
+        val displayName: String,
+        val description: String,
+        val installUrl: String,
+        val available: Boolean,
+        val isActive: Boolean,
+        val version: String?,
+        val path: String?,
+        val installedCount: Int,
+        val nvmEnabled: Boolean?,
+        val fnmShellConfigured: Boolean?,
+    )
+
     fun getContent(): JComponent {
         val mainPanel = JPanel(BorderLayout())
 
@@ -44,41 +63,100 @@ class ManagerPanel(private val project: Project) {
         }
         mainPanel.add(titleLabel, BorderLayout.NORTH)
 
-        // 管理器卡片列表
-        val cardsPanel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = BorderFactory.createEmptyBorder(0, 8, 8, 8)
-        }
-
-        val nvm = NvmVersionManager()
-        val fnm = FnmVersionManager()
-
-        // 冲突警告（仅当 nvm 启用且 fnm shell 已配置时显示）
-        if (nvm.isAvailable() && fnm.isAvailable() && isNvmEnabled() && isFnmShellConfigured()) {
-            cardsPanel.add(createConflictWarning())
-            cardsPanel.add(Box.createVerticalStrut(8))
-        }
-
-        // NVM 卡片
-        cardsPanel.add(createManagerCard(
-            manager = nvm,
-            installUrl = "https://github.com/coreybutler/nvm-windows/releases",
-            description = "Node Version Manager for Windows",
-        ))
-        cardsPanel.add(Box.createVerticalStrut(8))
-
-        // FNM 卡片
-        cardsPanel.add(createManagerCard(
-            manager = fnm,
-            installUrl = "https://github.com/Schniz/fnm#installation",
-            description = "Fast Node Manager (cross-platform)",
-        ))
-
-        cardsPanel.add(Box.createVerticalGlue())
-
         mainPanel.add(JBScrollPane(cardsPanel), BorderLayout.CENTER)
+        renderLoadingState()
+        refreshManagerCards()
 
         return mainPanel
+    }
+
+    private fun renderLoadingState() {
+        cardsPanel.removeAll()
+        cardsPanel.add(JBLabel("Loading manager status...").apply {
+            border = BorderFactory.createEmptyBorder(12, 4, 12, 4)
+            foreground = JBColor.GRAY
+        })
+        cardsPanel.revalidate()
+        cardsPanel.repaint()
+    }
+
+    private fun refreshManagerCards() {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val registry = VersionManagerRegistry.getInstance()
+            registry.detectAvailable()
+
+            val states = listOf(
+                buildManagerState(
+                    manager = NvmVersionManager(),
+                    installUrl = "https://github.com/coreybutler/nvm-windows/releases",
+                    description = "Node Version Manager for Windows",
+                ),
+                buildManagerState(
+                    manager = FnmVersionManager(),
+                    installUrl = "https://github.com/Schniz/fnm#installation",
+                    description = "Fast Node Manager (cross-platform)",
+                ),
+            )
+
+            val hasConflict = states.any { it.name == "nvm" && it.available } &&
+                states.any { it.name == "fnm" && it.available } &&
+                isNvmEnabled() &&
+                isFnmShellConfigured()
+
+            ApplicationManager.getApplication().invokeLater {
+                cardsPanel.removeAll()
+
+                if (hasConflict) {
+                    cardsPanel.add(createConflictWarning())
+                    cardsPanel.add(Box.createVerticalStrut(8))
+                }
+
+                states.forEachIndexed { index, state ->
+                    cardsPanel.add(createManagerCard(state))
+                    if (index != states.lastIndex) {
+                        cardsPanel.add(Box.createVerticalStrut(8))
+                    }
+                }
+
+                cardsPanel.revalidate()
+                cardsPanel.repaint()
+            }
+        }
+    }
+
+    private fun buildManagerState(
+        manager: VersionManager,
+        installUrl: String,
+        description: String,
+    ): ManagerCardState {
+        val available = manager.isAvailable()
+        val activeManagerName = VersionManagerRegistry.getInstance().getActiveManager()?.name
+
+        return ManagerCardState(
+            name = manager.name,
+            displayName = manager.displayName,
+            description = description,
+            installUrl = installUrl,
+            available = available,
+            isActive = activeManagerName == manager.name,
+            version = if (available) manager.getManagerVersion() else null,
+            path = getManagerPath(manager.name),
+            installedCount = if (available) {
+                try {
+                    manager.listInstalled().size
+                } catch (_: Exception) {
+                    0
+                }
+            } else {
+                0
+            },
+            nvmEnabled = if (available && manager.name == "nvm" && SystemInfo.isWindows) isNvmEnabled() else null,
+            fnmShellConfigured = if (available && manager.name == "fnm" && SystemInfo.isWindows) {
+                isFnmShellConfigured()
+            } else {
+                null
+            },
+        )
     }
 
     // ==================== 冲突警告 ====================
@@ -132,6 +210,7 @@ class ManagerPanel(private val project: Project) {
 
                     ApplicationManager.getApplication().invokeLater {
                         if (success) {
+                            refreshManagerCards()
                             showRestartDialog("nvm has been disabled.")
                         } else {
                             showNotification("Failed to disable nvm", NotificationType.ERROR)
@@ -209,6 +288,7 @@ class ManagerPanel(private val project: Project) {
                     profileFile.writeText(newContent)
 
                     ApplicationManager.getApplication().invokeLater {
+                        refreshManagerCards()
                         showRestartDialog("fnm shell integration has been removed.")
                     }
                 } catch (e: Exception) {
@@ -220,11 +300,7 @@ class ManagerPanel(private val project: Project) {
 
     // ==================== 管理器卡片 ====================
 
-    private fun createManagerCard(
-        manager: VersionManager,
-        installUrl: String,
-        description: String,
-    ): JPanel {
+    private fun createManagerCard(state: ManagerCardState): JPanel {
         val card = JPanel(GridBagLayout())
         card.border = BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(JBColor.border(), 1, true),
@@ -237,17 +313,13 @@ class ManagerPanel(private val project: Project) {
             insets = Insets(2, 0, 2, 8)
         }
 
-        val available = manager.isAvailable()
-        val registry = VersionManagerRegistry.getInstance()
-        val isActive = registry.getActiveManager()?.name == manager.name
-
         var row = 0
 
         // 名称
         gbc.gridx = 0; gbc.gridy = row
         card.add(JBLabel("Name:"), gbc)
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0
-        card.add(JBLabel(manager.displayName).apply {
+        card.add(JBLabel(state.displayName).apply {
             font = font.deriveFont(Font.BOLD)
         }, gbc)
 
@@ -256,8 +328,8 @@ class ManagerPanel(private val project: Project) {
         gbc.gridx = 0; gbc.gridy = row; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0
         card.add(JBLabel("Status:"), gbc)
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0
-        if (available) {
-            val activeTag = if (isActive) " (active)" else ""
+        if (state.available) {
+            val activeTag = if (state.isActive) " (active)" else ""
             card.add(JBLabel("✓ Installed$activeTag").apply {
                 foreground = JBColor(0x5FA04E, 0x6BBF59)
             }, gbc)
@@ -267,23 +339,22 @@ class ManagerPanel(private val project: Project) {
             }, gbc)
         }
 
-        if (available) {
+        if (state.available) {
             // 版本
             row++
             gbc.gridx = 0; gbc.gridy = row; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0
             card.add(JBLabel("Version:"), gbc)
             gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0
-            card.add(JBLabel(manager.getManagerVersion() ?: "—"), gbc)
+            card.add(JBLabel(state.version ?: "—"), gbc)
 
             // 安装路径
             row++
             gbc.gridx = 0; gbc.gridy = row; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0
             card.add(JBLabel("Path:"), gbc)
             gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0
-            val path = getManagerPath(manager)
-            card.add(JBLabel(path ?: "—").apply {
+            card.add(JBLabel(state.path ?: "—").apply {
                 foreground = JBColor.GRAY
-                toolTipText = path
+                toolTipText = state.path
             }, gbc)
 
             // 管理的版本数量
@@ -291,25 +362,23 @@ class ManagerPanel(private val project: Project) {
             gbc.gridx = 0; gbc.gridy = row; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0
             card.add(JBLabel("Versions:"), gbc)
             gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0
-            val count = try { manager.listInstalled().size } catch (e: Exception) { 0 }
-            card.add(JBLabel("$count installed"), gbc)
+            card.add(JBLabel("${state.installedCount} installed"), gbc)
 
             // nvm 专属：Enabled/Disabled 状态（通过 NVM_SYMLINK 检测）
-            if (manager.name == "nvm" && SystemInfo.isWindows) {
+            if (state.name == "nvm" && SystemInfo.isWindows) {
                 row++
                 gbc.gridx = 0; gbc.gridy = row; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0
                 card.add(JBLabel("Enabled:"), gbc)
                 gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0
 
-                val nvmEnabled = isNvmEnabled()
                 val enabledPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
-                if (nvmEnabled) {
+                if (state.nvmEnabled == true) {
                     enabledPanel.add(JBLabel("✓ On").apply {
                         foreground = JBColor(0x5FA04E, 0x6BBF59)
                     })
                     enabledPanel.add(JButton("Disable").apply {
                         toolTipText = "Run 'nvm off'"
-                        addActionListener { toggleNvm(false, card) }
+                        addActionListener { toggleNvm(false) }
                     })
                 } else {
                     enabledPanel.add(JBLabel("✗ Off").apply {
@@ -317,20 +386,20 @@ class ManagerPanel(private val project: Project) {
                     })
                     enabledPanel.add(JButton("Enable").apply {
                         toolTipText = "Run 'nvm on'"
-                        addActionListener { toggleNvm(true, card) }
+                        addActionListener { toggleNvm(true) }
                     })
                 }
                 card.add(enabledPanel, gbc)
             }
 
             // fnm 专属：Shell 集成检测
-            if (manager.name == "fnm" && SystemInfo.isWindows) {
+            if (state.name == "fnm" && SystemInfo.isWindows) {
                 row++
                 gbc.gridx = 0; gbc.gridy = row; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0
                 card.add(JBLabel("Shell:"), gbc)
                 gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0
 
-                if (isFnmShellConfigured()) {
+                if (state.fnmShellConfigured == true) {
                     val configuredPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
                     configuredPanel.add(JBLabel("✓ Configured").apply {
                         foreground = JBColor(0x5FA04E, 0x6BBF59)
@@ -347,7 +416,7 @@ class ManagerPanel(private val project: Project) {
                     })
                     shellPanel.add(JButton("Setup").apply {
                         toolTipText = "Add fnm env to PowerShell profile"
-                        addActionListener { setupFnmShell(card) }
+                        addActionListener { setupFnmShell() }
                     })
                     card.add(shellPanel, gbc)
                 }
@@ -359,25 +428,24 @@ class ManagerPanel(private val project: Project) {
         gbc.gridx = 0; gbc.gridy = row; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0
         card.add(JBLabel("About:"), gbc)
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0
-        card.add(JBLabel(description).apply { foreground = JBColor.GRAY }, gbc)
+        card.add(JBLabel(state.description).apply { foreground = JBColor.GRAY }, gbc)
 
         // 操作按钮
         row++
         gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 2; gbc.fill = GridBagConstraints.HORIZONTAL
         val buttonPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
 
-        if (available) {
+        if (state.available) {
             buttonPanel.add(JButton("Open Directory").apply {
                 addActionListener {
-                    val path = getManagerPath(manager)
-                    if (path != null) Desktop.getDesktop().open(File(path))
+                    if (state.path != null) Desktop.getDesktop().open(File(state.path))
                 }
             })
         }
 
         buttonPanel.add(createLinkButton(
-            if (available) "Homepage" else "Installation Guide",
-            installUrl,
+            if (state.available) "Homepage" else "Installation Guide",
+            state.installUrl,
         ))
         card.add(buttonPanel, gbc)
 
@@ -396,7 +464,7 @@ class ManagerPanel(private val project: Project) {
         }
     }
 
-    private fun setupFnmShell(card: JPanel) {
+    private fun setupFnmShell() {
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Setting up fnm shell integration...") {
             override fun run(indicator: ProgressIndicator) {
                 try {
@@ -420,8 +488,8 @@ class ManagerPanel(private val project: Project) {
                     )
 
                     ApplicationManager.getApplication().invokeLater {
+                        refreshManagerCards()
                         showRestartDialog("fnm shell integration configured!")
-                        SwingUtilities.getWindowAncestor(card)?.repaint()
                     }
                 } catch (e: Exception) {
                     showNotification("Failed to setup fnm shell: ${e.message}", NotificationType.ERROR)
@@ -466,7 +534,7 @@ class ManagerPanel(private val project: Project) {
     /**
      * 切换 nvm on/off
      */
-    private fun toggleNvm(enable: Boolean, card: JPanel) {
+    private fun toggleNvm(enable: Boolean) {
         val cmd = if (enable) "on" else "off"
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Running nvm $cmd...") {
             override fun run(indicator: ProgressIndicator) {
@@ -474,12 +542,11 @@ class ManagerPanel(private val project: Project) {
                     val success = executeNvmCommand(cmd)
                     ApplicationManager.getApplication().invokeLater {
                         if (success) {
+                            refreshManagerCards()
                             showRestartDialog("nvm $cmd executed successfully.")
                         } else {
                             showNotification("Failed to run nvm $cmd", NotificationType.ERROR)
                         }
-                        // 刷新整个面板
-                        SwingUtilities.getWindowAncestor(card)?.repaint()
                     }
                 } catch (e: Exception) {
                     showNotification("Failed to run nvm $cmd: ${e.message}", NotificationType.ERROR)
@@ -519,8 +586,8 @@ class ManagerPanel(private val project: Project) {
 
     // ==================== 通用方法 ====================
 
-    private fun getManagerPath(manager: VersionManager): String? {
-        return when (manager.name) {
+    private fun getManagerPath(managerName: String): String? {
+        return when (managerName) {
             "nvm" -> FileSystemHelper.getNvmDir()?.absolutePath
             "fnm" -> FileSystemHelper.getFnmDir()?.absolutePath
             else -> null

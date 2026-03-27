@@ -5,6 +5,7 @@ import com.github.nicestudent.nodemanager.services.ProjectConfigService
 import com.github.nicestudent.nodemanager.ui.settings.NodeManagerSettings
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
@@ -22,37 +23,41 @@ class NodeManagerStartupActivity : ProjectActivity {
 
         log.info("Node Manager: detecting Node.js version on startup...")
 
-        // 检测当前 Node 版本
-        val currentVersion = NodeVersionService.getInstance().getCurrentVersion()
-        if (currentVersion != null) {
-            log.info("Current Node.js version: $currentVersion")
-        }
-
-        // 检查项目级版本配置
-        val projectConfig = ProjectConfigService.getInstance(project)
-        val requiredVersion = projectConfig.getProjectNodeVersion()
-        if (requiredVersion != null && currentVersion != null) {
-            val normalizedRequired = requiredVersion.removePrefix("v")
-            val normalizedCurrent = currentVersion.removePrefix("v")
-            if (normalizedRequired != normalizedCurrent) {
-                NotificationGroupManager.getInstance()
-                    .getNotificationGroup("Node Manager")
-                    .createNotification(
-                        "Node.js Version Mismatch",
-                        "Project requires Node.js $requiredVersion, but current version is $currentVersion.",
-                        NotificationType.WARNING,
-                    )
-                    .notify(project)
+        // 异步刷新版本信息
+        NodeVersionService.getInstance().refreshCurrentVersionAsync {
+            val currentVersion = NodeVersionService.getInstance().getCurrentVersion()
+            if (currentVersion != null) {
+                log.info("Current Node.js version: $currentVersion")
             }
-        }
 
-        // 检查 package.json 中的 engines.node
-        val enginesNode = projectConfig.getEnginesNodeRequirement()
-        if (enginesNode != null) {
-            log.info("package.json engines.node requirement: $enginesNode")
-        }
+            // 检查项目级版本配置
+            val projectConfig = ProjectConfigService.getInstance(project)
+            val requiredVersion = projectConfig.getProjectNodeVersion()
+            if (requiredVersion != null && currentVersion != null) {
+                val normalizedRequired = requiredVersion.removePrefix("v")
+                val normalizedCurrent = currentVersion.removePrefix("v")
+                if (normalizedRequired != normalizedCurrent) {
+                    ApplicationManager.getApplication().invokeLater {
+                        NotificationGroupManager.getInstance()
+                            .getNotificationGroup("Node Manager")
+                            .createNotification(
+                                "Node.js Version Mismatch",
+                                "Project requires Node.js $requiredVersion, but current version is $currentVersion.",
+                                NotificationType.WARNING,
+                            )
+                            .notify(project)
+                    }
+                }
+            }
 
-        // 预加载本地版本列表进缓存
-        NodeVersionService.getInstance().detectLocalVersions()
+            // 检查 package.json 中的 engines.node
+            val enginesNode = projectConfig.getEnginesNodeRequirement()
+            if (enginesNode != null) {
+                log.info("package.json engines.node requirement: $enginesNode")
+            }
+
+            // 异步预加载本地版本列表进缓存
+            NodeVersionService.getInstance().refreshLocalVersionsAsync()
+        }
     }
 }

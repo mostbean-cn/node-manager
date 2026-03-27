@@ -1,6 +1,7 @@
 package com.github.nicestudent.nodemanager.ui.toolwindow
 
 import com.github.nicestudent.nodemanager.actions.NodeVersionRefreshListener
+import com.github.nicestudent.nodemanager.manager.VersionManager
 import com.github.nicestudent.nodemanager.manager.VersionManagerRegistry
 import com.github.nicestudent.nodemanager.model.NodeInstallation
 import com.github.nicestudent.nodemanager.services.NodeInstallService
@@ -80,33 +81,52 @@ class NodeVersionListPanel(private val project: Project) {
         panel.add(managerStatusLabel, BorderLayout.WEST)
 
         // 右侧：管理器切换下拉框
+        // 使用缓存的管理器信息，避免在 EDT 上执行阻塞操作
         val registry = VersionManagerRegistry.getInstance()
-        val available = registry.detectAvailable()
+        val allManagers = registry.getAllManagers()
 
-        if (available.size > 1) {
-            val managerNames = available.map { it.displayName }.toTypedArray()
-            managerComboBox.model = DefaultComboBoxModel(managerNames)
+        // 只显示可用的管理器（需要异步检测）
+        val availableManagers = mutableListOf<VersionManager>()
 
-            // 选中当前活跃管理器
-            val active = registry.getActiveManager()
-            if (active != null) {
-                managerComboBox.selectedItem = active.displayName
-            }
+        if (allManagers.size > 1) {
+            // 异步检测可用管理器并更新下拉框
+            ApplicationManager.getApplication().executeOnPooledThread {
+                for (manager in allManagers) {
+                    if (manager.isAvailable()) {
+                        availableManagers.add(manager)
+                    }
+                }
 
-            managerComboBox.addActionListener {
-                val selectedDisplay = managerComboBox.selectedItem?.toString() ?: return@addActionListener
-                val selectedManager = available.find { it.displayName == selectedDisplay }
-                if (selectedManager != null) {
-                    registry.setActiveManager(selectedManager.name)
-                    updateManagerStatus()
-                    refreshLocalVersions()
+                ApplicationManager.getApplication().invokeLater {
+                    if (availableManagers.size > 1) {
+                        val managerNames = availableManagers.map { it.displayName }.toTypedArray()
+                        managerComboBox.model = DefaultComboBoxModel(managerNames)
+
+                        // 选中当前活跃管理器
+                        val active = registry.getActiveManager()
+                        if (active != null) {
+                            managerComboBox.selectedItem = active.displayName
+                        }
+
+                        managerComboBox.addActionListener {
+                            val selectedDisplay = managerComboBox.selectedItem?.toString() ?: return@addActionListener
+                            val selectedManager = availableManagers.find { it.displayName == selectedDisplay }
+                            if (selectedManager != null) {
+                                registry.setActiveManager(selectedManager.name)
+                                updateManagerStatus()
+                                refreshLocalVersions()
+                            }
+                        }
+
+                        val switchPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0))
+                        switchPanel.add(JBLabel("Switch:"))
+                        switchPanel.add(managerComboBox)
+                        panel.add(switchPanel, BorderLayout.EAST)
+                        panel.revalidate()
+                        panel.repaint()
+                    }
                 }
             }
-
-            val switchPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0))
-            switchPanel.add(JBLabel("Switch:"))
-            switchPanel.add(managerComboBox)
-            panel.add(switchPanel, BorderLayout.EAST)
         }
 
         return panel
@@ -170,11 +190,19 @@ class NodeVersionListPanel(private val project: Project) {
         val manager = registry.getActiveManager()
 
         if (manager != null) {
-            val version = manager.getManagerVersion()
-            val versionSuffix = if (version != null) " v$version" else ""
-            managerStatusLabel.text = "● ${manager.displayName}$versionSuffix"
+            // 先显示基本信息
+            managerStatusLabel.text = "● ${manager.displayName}"
             managerStatusLabel.toolTipText = "Using ${manager.displayName} to manage Node.js versions"
             managerStatusLabel.foreground = JBColor(0x5FA04E, 0x6BBF59)
+
+            // 异步获取管理器版本
+            ApplicationManager.getApplication().executeOnPooledThread {
+                val version = manager.getManagerVersion()
+                ApplicationManager.getApplication().invokeLater {
+                    val versionSuffix = if (version != null) " v$version" else ""
+                    managerStatusLabel.text = "● ${manager.displayName}$versionSuffix"
+                }
+            }
         } else {
             managerStatusLabel.text = "⚠ No version manager found"
             managerStatusLabel.toolTipText = "Please install nvm or fnm to manage Node.js versions"

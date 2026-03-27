@@ -54,7 +54,15 @@ class NodeVersionStatusBarWidget(private val project: Project) : StatusBarWidget
 
     override fun install(statusBar: StatusBar) {
         this.statusBar = statusBar
-        updateWidget()
+        // 异步刷新版本信息，避免在 EDT 上执行阻塞操作
+        NodeVersionService.getInstance().refreshCurrentVersionAsync {
+            // 版本刷新后，再刷新本地版本列表
+            NodeVersionService.getInstance().refreshLocalVersionsAsync {
+                ApplicationManager.getApplication().invokeLater {
+                    updateWidget()
+                }
+            }
+        }
     }
 
     override fun dispose() {
@@ -109,19 +117,24 @@ class NodeVersionStatusBarWidget(private val project: Project) : StatusBarWidget
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Switching to Node.js $version...") {
             override fun run(indicator: ProgressIndicator) {
                 val success = NodeSwitchService.switchGlobal(version)
-                ApplicationManager.getApplication().invokeLater {
-                    if (success) {
-                        NotificationGroupManager.getInstance()
-                            .getNotificationGroup("Node Manager")
-                            .createNotification("Switched to Node.js $version", NotificationType.INFORMATION)
-                            .notify(project)
-                    } else {
+                if (success) {
+                    // 切换成功后刷新版本缓存
+                    NodeVersionService.getInstance().refreshCurrentVersionAsync {
+                        ApplicationManager.getApplication().invokeLater {
+                            NotificationGroupManager.getInstance()
+                                .getNotificationGroup("Node Manager")
+                                .createNotification("Switched to Node.js $version", NotificationType.INFORMATION)
+                                .notify(project)
+                            updateWidget()
+                        }
+                    }
+                } else {
+                    ApplicationManager.getApplication().invokeLater {
                         NotificationGroupManager.getInstance()
                             .getNotificationGroup("Node Manager")
                             .createNotification("Failed to switch to Node.js $version", NotificationType.ERROR)
                             .notify(project)
                     }
-                    updateWidget()
                 }
             }
         })

@@ -27,6 +27,9 @@ class NodeManagerSettingsConfigurable : Configurable {
     private var mirrorField: JBTextField? = null
     private var autoDetectCheckbox: JBCheckBox? = null
     private var managerComboBox: JComboBox<String>? = null
+    private var detectedManagersLabel: JBLabel? = null
+    private var activeManagerLabel: JBLabel? = null
+    private var installGuidePanel: JPanel? = null
 
     override fun getDisplayName(): String = "Node Manager"
 
@@ -43,6 +46,7 @@ class NodeManagerSettingsConfigurable : Configurable {
 
         mainPanel = panel
         loadSettings()
+        refreshManagerSectionAsync()
         return panel
     }
 
@@ -54,32 +58,21 @@ class NodeManagerSettingsConfigurable : Configurable {
             anchor = GridBagConstraints.WEST
         }
 
-        val registry = VersionManagerRegistry.getInstance()
-        val available = registry.detectAvailable()
-
         // 行 1：检测到的管理器 + 安装路径
         gbc.gridx = 0; gbc.gridy = 0
         section.add(JBLabel("Detected:"), gbc)
 
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0
-        val detectedText = if (available.isNotEmpty()) {
-            available.joinToString(" | ") { manager ->
-                val ver = manager.getManagerVersion()
-                if (ver != null) "${manager.displayName} v$ver" else manager.displayName
-            }
-        } else {
-            "No version manager found"
-        }
-        section.add(JBLabel(detectedText), gbc)
+        detectedManagersLabel = JBLabel("Detecting version managers...")
+        section.add(detectedManagersLabel!!, gbc)
 
         // 行 2：管理器选择
         gbc.gridx = 0; gbc.gridy = 1; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0
         section.add(JBLabel("Preferred:"), gbc)
 
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0
-        val managerNames = available.map { it.name }.toTypedArray()
-        managerComboBox = JComboBox(if (managerNames.isEmpty()) arrayOf("(none)") else managerNames)
-        managerComboBox?.isEnabled = managerNames.size > 1
+        managerComboBox = JComboBox(arrayOf("(detecting...)"))
+        managerComboBox?.isEnabled = false
         section.add(managerComboBox!!, gbc)
 
         // 行 3：当前管理器状态
@@ -87,32 +80,72 @@ class NodeManagerSettingsConfigurable : Configurable {
         section.add(JBLabel("Active:"), gbc)
 
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0
-        val activeManager = registry.getActiveManager()
-        val activeText = if (activeManager != null) {
-            val ver = activeManager.getManagerVersion()
-            val versionText = if (ver != null) " v$ver" else ""
-            "${activeManager.displayName}$versionText  ✓"
-        } else {
-            "—"
-        }
-        section.add(JBLabel(activeText), gbc)
+        activeManagerLabel = JBLabel("Detecting...")
+        section.add(activeManagerLabel!!, gbc)
 
         // 行 4：安装指南链接
-        if (available.isEmpty()) {
-            gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 2
-            val linkPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0))
-            linkPanel.add(JBLabel("Install: "))
-
-            val nvmLink = createHyperlink("nvm-windows", "https://github.com/coreybutler/nvm-windows/releases")
-            linkPanel.add(nvmLink)
-            linkPanel.add(JBLabel(" | "))
-            val fnmLink = createHyperlink("fnm", "https://github.com/Schniz/fnm#installation")
-            linkPanel.add(fnmLink)
-
-            section.add(linkPanel, gbc)
-        }
+        gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 2
+        installGuidePanel = createInstallGuidePanel().apply { isVisible = false }
+        section.add(installGuidePanel!!, gbc)
 
         return section
+    }
+
+    private fun refreshManagerSectionAsync() {
+        val registry = VersionManagerRegistry.getInstance()
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val available = registry.detectAvailable()
+            val detectedText = if (available.isNotEmpty()) {
+                available.joinToString(" | ") { manager ->
+                    val version = manager.getManagerVersion()
+                    if (version != null) "${manager.displayName} v$version" else manager.displayName
+                }
+            } else {
+                "No version manager found"
+            }
+
+            val activeManager = registry.getActiveManager()
+            val activeText = if (activeManager != null) {
+                val version = activeManager.getManagerVersion()
+                val versionText = if (version != null) " v$version" else ""
+                "${activeManager.displayName}$versionText  ✓"
+            } else {
+                "—"
+            }
+
+            val managerNames = available.map { it.name }.toTypedArray()
+
+            ApplicationManager.getApplication().invokeLater {
+                detectedManagersLabel?.text = detectedText
+                activeManagerLabel?.text = activeText
+
+                managerComboBox?.model = DefaultComboBoxModel(
+                    if (managerNames.isEmpty()) arrayOf("(none)") else managerNames
+                )
+                managerComboBox?.isEnabled = managerNames.size > 1
+                installGuidePanel?.isVisible = available.isEmpty()
+
+                val preferred = NodeManagerSettings.getInstance().state.preferredManager
+                managerComboBox?.selectedItem = when {
+                    preferred.isNotBlank() && managerNames.contains(preferred) -> preferred
+                    activeManager != null && managerNames.contains(activeManager.name) -> activeManager.name
+                    managerNames.isEmpty() -> "(none)"
+                    else -> managerNames.first()
+                }
+
+                mainPanel?.revalidate()
+                mainPanel?.repaint()
+            }
+        }
+    }
+
+    private fun createInstallGuidePanel(): JPanel {
+        return JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            add(JBLabel("Install: "))
+            add(createHyperlink("nvm-windows", "https://github.com/coreybutler/nvm-windows/releases"))
+            add(JBLabel(" | "))
+            add(createHyperlink("fnm", "https://github.com/Schniz/fnm#installation"))
+        }
     }
 
     private fun createHyperlink(text: String, url: String): JButton {
@@ -151,16 +184,17 @@ class NodeManagerSettingsConfigurable : Configurable {
 
     override fun isModified(): Boolean {
         val settings = NodeManagerSettings.getInstance()
+        val selectedManager = normalizeManagerSelection(managerComboBox?.selectedItem?.toString())
         return mirrorField?.text != settings.state.mirrorUrl ||
                 autoDetectCheckbox?.isSelected != settings.state.autoDetect ||
-                managerComboBox?.selectedItem?.toString() != settings.state.preferredManager
+                selectedManager != settings.state.preferredManager
     }
 
     override fun apply() {
         val settings = NodeManagerSettings.getInstance()
         settings.state.mirrorUrl = mirrorField?.text ?: ""
         settings.state.autoDetect = autoDetectCheckbox?.isSelected ?: true
-        settings.state.preferredManager = managerComboBox?.selectedItem?.toString() ?: ""
+        settings.state.preferredManager = normalizeManagerSelection(managerComboBox?.selectedItem?.toString())
 
         // 应用管理器偏好
         val preferred = settings.state.preferredManager
@@ -183,6 +217,11 @@ class NodeManagerSettingsConfigurable : Configurable {
         if (preferred.isNotBlank()) {
             managerComboBox?.selectedItem = preferred
         }
+    }
+
+    private fun normalizeManagerSelection(selection: String?): String {
+        val value = selection?.trim().orEmpty()
+        return if (value.startsWith("(")) "" else value
     }
 }
 
