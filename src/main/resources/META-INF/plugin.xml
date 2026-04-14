@@ -6,7 +6,7 @@
 
         <description><![CDATA[
     <h2>Node Manager</h2>
-    <p>Manage Node.js versions directly within IntelliJ IDEA.</p>
+    <p>Manage Node.js versions directly within IntelliJ Platform-based IDEs.</p>
 
     <h3>Features</h3>
     <ul>

@@ -1,6 +1,6 @@
 # Node Manager
 
-> IntelliJ IDEA plugin for managing Node.js versions directly within the IDE.
+> IntelliJ Platform plugin for managing Node.js versions directly within JetBrains IDEs.
 
 ## Features
 
@@ -14,7 +14,7 @@
 
 ## Requirements
 
-- IntelliJ IDEA 2024.1+
+- IntelliJ Platform IDE 2024.2+
 - At least one of the following version managers installed:
   - [nvm](https://github.com/nvm-sh/nvm) (Mac / Linux)
   - [nvm-windows](https://github.com/coreybutler/nvm-windows) (Windows)

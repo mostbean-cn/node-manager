@@ -1,6 +1,6 @@
 # Node Manager
 
-> IntelliJ IDEA 插件 —— 在 IDE 中直接管理 Node.js 版本。
+> IntelliJ Platform 插件 —— 在 JetBrains IDE 中直接管理 Node.js 版本。
 
 ## 功能特性
 
@@ -14,7 +14,7 @@
 
 ## 环境要求
 
-- IntelliJ IDEA 2024.1+
+- IntelliJ Platform IDE 2024.2+
 - 至少安装以下一个版本管理器：
   - [nvm](https://github.com/nvm-sh/nvm)（Mac / Linux）
   - [nvm-windows](https://github.com/coreybutler/nvm-windows)（Windows）

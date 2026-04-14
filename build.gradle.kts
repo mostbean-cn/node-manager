@@ -37,7 +37,7 @@ dependencies {
 
     // IntelliJ Platform
     intellijPlatform {
-        intellijIdea(providers.gradleProperty("platformVersion"))
+        intellijIdeaCommunity(providers.gradleProperty("platformVersion"))
 
         bundledPlugins(providers.gradleProperty("platformBundledPlugins").map { it.split(',') })
         plugins(providers.gradleProperty("platformPlugins").map { it.split(',') })
@@ -54,7 +54,7 @@ intellijPlatform {
 
         description = """
             <h2>Node Manager</h2>
-            <p>Manage Node.js versions directly within IntelliJ IDEA.</p>
+            <p>Manage Node.js versions directly within IntelliJ Platform-based IDEs.</p>
 
             <h3>Features</h3>
             <ul>
