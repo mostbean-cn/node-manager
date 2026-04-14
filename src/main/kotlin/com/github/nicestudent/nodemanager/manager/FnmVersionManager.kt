@@ -16,6 +16,8 @@ import java.io.File
 class FnmVersionManager : VersionManager {
 
     private val log = Logger.getInstance(FnmVersionManager::class.java)
+    private val versionPattern = Regex("v?\\d+\\.\\d+\\.\\d+")
+    private val versionPathPattern = Regex("node-versions[/\\\\](v\\d+\\.\\d+\\.\\d+)")
 
     override val name: String = "fnm"
 
@@ -60,26 +62,41 @@ class FnmVersionManager : VersionManager {
     /**
      * 获取 fnm 当前默认 Node.js 版本
      *
-     * 不调用 `fnm current`（依赖 fnm env shell 环境）。
-     * 通过读取 `aliases/default` 目录链接 (Junction) 的目标路径来获取：
+     * 优先调用 `fnm current` 获取当前版本；
+     * 如果失败，则回退到读取 `aliases/default` 目录链接的真实路径。
+     *
+     * Windows 下 `aliases/default` 通常是 Junction 而不是 Symbolic Link，
+     * 因此不能使用 `Files.readSymbolicLink`，需要通过 `toRealPath()` 解析。
+     *
      * 目标路径格式如 `.../node-versions/v23.6.1/installation`，
      * 从中提取版本号。
      */
     override fun current(): String? {
+        try {
+            val current = ProcessExecutor.executeAndGetOutput(listOf("fnm", "current"))
+                ?.trim()
+                ?.takeIf { versionPattern.matches(it) }
+            if (current != null) {
+                return normalizeVersion(current)
+            }
+        } catch (e: Exception) {
+            log.info("Failed to detect fnm current version via command: ${e.message}")
+        }
+
         return try {
             val fnmDir = FileSystemHelper.getFnmDir() ?: return null
             val defaultAlias = File(fnmDir, "aliases/default").toPath()
 
-            // 读取 Junction/Symlink 的目标路径
-            val target = java.nio.file.Files.readSymbolicLink(defaultAlias).toString()
-
-            // 从路径中提取版本号: .../node-versions/v23.6.1/installation
-            val versionRegex = Regex("node-versions[/\\\\](v\\d+\\.\\d+\\.\\d+)")
-            versionRegex.find(target)?.groupValues?.get(1)
+            val target = defaultAlias.toRealPath().toString()
+            versionPathPattern.find(target)?.groupValues?.get(1)
         } catch (e: Exception) {
-            log.info("Failed to detect fnm current version: ${e.message}")
+            log.info("Failed to detect fnm current version via alias: ${e.message}")
             null
         }
+    }
+
+    private fun normalizeVersion(version: String): String {
+        return if (version.startsWith("v")) version else "v$version"
     }
 
     override fun install(version: String, indicator: ProgressIndicator?): Boolean {

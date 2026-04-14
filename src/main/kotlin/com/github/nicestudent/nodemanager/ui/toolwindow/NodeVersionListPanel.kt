@@ -35,6 +35,7 @@ import javax.swing.*
 class NodeVersionListPanel(private val project: Project) {
 
     private val localListModel = DefaultListModel<NodeInstallation>()
+    private val localList = JBList(localListModel)
     private val versionService = NodeVersionService.getInstance()
 
     // 管理器状态
@@ -143,7 +144,6 @@ class NodeVersionListPanel(private val project: Project) {
         panel.add(toolbar, BorderLayout.NORTH)
 
         // 版本列表
-        val localList = JBList(localListModel)
         localList.cellRenderer = LocalVersionCellRenderer()
         localList.selectionMode = ListSelectionModel.SINGLE_SELECTION
         panel.add(JBScrollPane(localList), BorderLayout.CENTER)
@@ -213,16 +213,14 @@ class NodeVersionListPanel(private val project: Project) {
     // ==================== 数据操作 ====================
 
     fun refreshLocalVersions() {
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Detecting Node.js versions...") {
-            override fun run(indicator: ProgressIndicator) {
-                val versions = versionService.detectLocalVersions()
-                ApplicationManager.getApplication().invokeLater {
-                    localListModel.clear()
-                    versions.forEach { localListModel.addElement(it) }
-                    updateManagerStatus()
-                }
+        versionService.refreshVersionStateAsync { versions ->
+            ApplicationManager.getApplication().invokeLater {
+                localListModel.clear()
+                versions.forEach { localListModel.addElement(it) }
+                selectActiveVersion(versions)
+                updateManagerStatus()
             }
-        })
+        }
     }
 
     private fun switchVersion(version: String) {
@@ -270,6 +268,16 @@ class NodeVersionListPanel(private val project: Project) {
             .getNotificationGroup("Node Manager")
             .createNotification(message, type)
             .notify(project)
+    }
+
+    private fun selectActiveVersion(versions: List<NodeInstallation>) {
+        val activeIndex = versions.indexOfFirst { it.isActive }
+        if (activeIndex >= 0) {
+            localList.selectedIndex = activeIndex
+            localList.ensureIndexIsVisible(activeIndex)
+        } else {
+            localList.clearSelection()
+        }
     }
 
     // ==================== 列表渲染器 ====================

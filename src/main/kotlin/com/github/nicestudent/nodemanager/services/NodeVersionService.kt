@@ -103,6 +103,30 @@ class NodeVersionService {
     }
 
     /**
+     * 异步刷新当前版本和本地版本列表缓存
+     *
+     * 统一串联初始化、当前版本检测和本地版本检测，
+     * 避免 UI 因调用顺序不一致拿到过期状态。
+     */
+    fun refreshVersionStateAsync(onComplete: ((List<NodeInstallation>) -> Unit)? = null) {
+        VersionManagerRegistry.getInstance().initializeAsync {
+            ApplicationManager.getApplication().executeOnPooledThread {
+                var versions = localVersionsCache
+                try {
+                    val version = detectCurrentVersionSync()
+                    currentVersionCache.set(version)
+                    versions = detectLocalVersions()
+                    log.info("Version state refreshed: current=$version, local=${versions.size}")
+                } catch (e: Exception) {
+                    log.warn("Failed to refresh version state: ${e.message}")
+                } finally {
+                    onComplete?.invoke(versions)
+                }
+            }
+        }
+    }
+
+    /**
      * 同步检测当前版本（必须在后台线程调用）
      */
     private fun detectCurrentVersionSync(): String? {
@@ -131,14 +155,16 @@ class NodeVersionService {
      * 在后台线程中执行检测，完成后回调通知 UI 更新。
      */
     fun refreshLocalVersionsAsync(onComplete: (() -> Unit)? = null) {
-        ApplicationManager.getApplication().executeOnPooledThread {
-            try {
-                detectLocalVersions()
-                log.info("Local versions refreshed: ${localVersionsCache.size} versions")
-            } catch (e: Exception) {
-                log.warn("Failed to refresh local versions: ${e.message}")
-            } finally {
-                onComplete?.invoke()
+        VersionManagerRegistry.getInstance().initializeAsync {
+            ApplicationManager.getApplication().executeOnPooledThread {
+                try {
+                    detectLocalVersions()
+                    log.info("Local versions refreshed: ${localVersionsCache.size} versions")
+                } catch (e: Exception) {
+                    log.warn("Failed to refresh local versions: ${e.message}")
+                } finally {
+                    onComplete?.invoke()
+                }
             }
         }
     }

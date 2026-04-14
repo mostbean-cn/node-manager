@@ -54,13 +54,9 @@ class NodeVersionStatusBarWidget(private val project: Project) : StatusBarWidget
 
     override fun install(statusBar: StatusBar) {
         this.statusBar = statusBar
-        // 异步刷新版本信息，避免在 EDT 上执行阻塞操作
-        NodeVersionService.getInstance().refreshCurrentVersionAsync {
-            // 版本刷新后，再刷新本地版本列表
-            NodeVersionService.getInstance().refreshLocalVersionsAsync {
-                ApplicationManager.getApplication().invokeLater {
-                    updateWidget()
-                }
+        NodeVersionService.getInstance().refreshVersionStateAsync {
+            ApplicationManager.getApplication().invokeLater {
+                updateWidget()
             }
         }
     }
@@ -118,8 +114,7 @@ class NodeVersionStatusBarWidget(private val project: Project) : StatusBarWidget
             override fun run(indicator: ProgressIndicator) {
                 val success = NodeSwitchService.switchGlobal(version)
                 if (success) {
-                    // 切换成功后刷新版本缓存
-                    NodeVersionService.getInstance().refreshCurrentVersionAsync {
+                    NodeVersionService.getInstance().refreshVersionStateAsync {
                         ApplicationManager.getApplication().invokeLater {
                             NotificationGroupManager.getInstance()
                                 .getNotificationGroup("Node Manager")

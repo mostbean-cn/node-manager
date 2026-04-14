@@ -23,8 +23,7 @@ class NodeManagerStartupActivity : ProjectActivity {
 
         log.info("Node Manager: detecting Node.js version on startup...")
 
-        // 异步刷新版本信息
-        NodeVersionService.getInstance().refreshCurrentVersionAsync {
+        NodeVersionService.getInstance().refreshVersionStateAsync {
             val currentVersion = NodeVersionService.getInstance().getCurrentVersion()
             if (currentVersion != null) {
                 log.info("Current Node.js version: $currentVersion")
@@ -55,9 +54,6 @@ class NodeManagerStartupActivity : ProjectActivity {
             if (enginesNode != null) {
                 log.info("package.json engines.node requirement: $enginesNode")
             }
-
-            // 异步预加载本地版本列表进缓存
-            NodeVersionService.getInstance().refreshLocalVersionsAsync()
         }
     }
 }
